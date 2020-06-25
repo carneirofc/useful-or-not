@@ -20,16 +20,8 @@ double get_uptime(){
     return uptime;
 }
 
-void main(int argc, char **argv) {
-    int pid;
-    sscanf(argv[1], "%d", &pid);
-    printf("pid = %d\n", pid);
-
-    char filename[1000];
-    sprintf(filename, "/proc/%d/stat", pid);
-
 /**************************************************************************
-*      /proc/[pid]/stat
+*      /proc/[pid]/stat https://man7.org/linux/man-pages/man5/proc.5.html
 *     
 *             (1) pid  %d
 *             (2) comm  %s
@@ -84,22 +76,21 @@ void main(int argc, char **argv) {
 *             (51) env_end  %lu  (since Linux 3.5)  [PT]
 *             (52) exit_code  %d  (since Linux 3.5)  [PT]
 *************************************************************************/
+typedef struct {
     char name[1000];
-    double total_time, seconds, cpu_usage;
-    long cutime, cstime;
-    long pid_, freq;
+    long cutime, cstime, pid;
     struct sysinfo s_info;
     unsigned long long starttime;
     unsigned long utime, stime;
-    freq = sysconf(_SC_CLK_TCK);
+}sys_stat_t;
 
-    printf("PID,Name,CPU(%)\n");
-    for(;;){
-        double uptime = get_uptime();
+void update_proc_stat(int _pid, sys_stat_t* sys_stat){
         // Get process status
+        char filename[1000];
+        sprintf(filename, "/proc/%d/stat", _pid);
         FILE *f = fopen(filename, "r");
         if(f == NULL){
-            printf("Failed to get %d stat\n", pid);
+            printf("Failed to get %d stat\n", _pid);
             exit(1);
         }
 
@@ -126,27 +117,50 @@ void main(int argc, char **argv) {
                 /*(20) num_threads */   " %*ld"
                 /*(21) itrealvalue */   " %*ld"
                 /*(22) starttime   */   " %llu"
-                ,&pid_, &name, &utime, &stime, &cutime, &cstime, &starttime);
+                ,
+            &sys_stat->pid,
+            &sys_stat->name,
+            &sys_stat->utime,
+            &sys_stat->stime,
+            &sys_stat->cutime,
+            &sys_stat->cstime,
+            &sys_stat->starttime);
         fclose(f);
+}
 
-        // Some math
-        // First we determine the total time spent for the process:
-        total_time = utime + stime + cutime + cstime;
-        // Next we get the total elapsed time in seconds since the process started:
-        seconds = uptime - (starttime / freq);
-        // Finally we calculate the CPU usage percentage:
-        cpu_usage = 100. * ((total_time / freq) / seconds);
+double get_cpu_usage(sys_stat_t* sys_stat, double uptime, double freq){
+    double total_time, seconds, cpu_usage;
+    // Some math
+    // First we determine the total time spent for the process:
+    total_time = sys_stat->utime + sys_stat->stime + sys_stat->cutime + sys_stat->cstime;
 
-       /* printf("PID %d\tName \"%s\"\tutime %lu\tstime %lu\tctime %ld\tcstime %ld\tstarttime %llu\tuptime %lf\tCpu %lf\n",
-            pid_,
-            name,
-            utime,
-            stime,
-            cutime,
-            cstime,
-            starttime,
-            uptime,
-            (double)cpu_usage);*/
-        printf("%d,%s,%lf\n", pid_, name, cpu_usage);
+    // Next we get the total elapsed time in seconds since the process started:
+    seconds = uptime - (sys_stat->starttime / freq);
+
+    // Finally we calculate the CPU usage percentage:
+    cpu_usage = 100. * ((total_time / freq) / seconds);
+    return cpu_usage;
+}
+
+void main(int argc, char **argv) {
+    int pid;
+    sscanf(argv[1], "%d", &pid);
+    printf("pid = %d\n", pid);
+
+    char name[1000];
+    long pid_, freq;
+    struct sysinfo s_info;
+    sys_stat_t sys_stat;
+
+    freq = sysconf(_SC_CLK_TCK);
+
+    printf("PID,Name,CPU(%)\n");
+
+    for(;;){
+        double uptime = get_uptime();
+        update_proc_stat(pid, &sys_stat);
+        double cpu_usage = get_cpu_usage(&sys_stat, uptime, freq);
+
+        printf("%d,%s,%lf\n", sys_stat.pid, sys_stat.name, cpu_usage);
     }
 }

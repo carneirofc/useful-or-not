@@ -1,4 +1,5 @@
 #include <errno.h>
+#include <errno.h>
 #include <fcntl.h>
 #include <linux/kernel.h> /* for struct sysinfo */
 #include <linux/unistd.h> /* for _syscallX macros/related stuff */
@@ -7,6 +8,7 @@
 #include <sys/stat.h>
 #include <sys/sysinfo.h>
 #include <sys/types.h>
+#include <time.h>
 #include <unistd.h>
 
 /**************************************************************************
@@ -113,23 +115,64 @@ void update_proc_stat(int pid, sys_stat_t *sys_stat) {
     fclose(fd);
 }
 
+void get_uptime(double *uptime);
+
 /**
  * Calculate a process total cpu usage.
  * */
 void get_cpu_usage(sys_stat_t *sys_stat, double uptime, double freq,
+                   double *process_cpu_time, double *process_lifetime,
                    double *cpu_usage) {
-    double process_cpu_time, process_lifetime;
     // First we determine the total time spent for the process:
-    process_cpu_time = (sys_stat->utime + sys_stat->stime + sys_stat->cutime +
-                        sys_stat->cstime) /
-                       freq;
+    *process_cpu_time = (sys_stat->utime + sys_stat->stime + sys_stat->cutime +
+                         sys_stat->cstime) /
+                        freq;
 
     // Next we get the total elapsed time in seconds since the process started:
-    process_lifetime = uptime - (sys_stat->starttime / freq);
+    *process_lifetime = uptime - (sys_stat->starttime / freq);
 
     // Finally we calculate the CPU usage percentage:
-    *cpu_usage = 100. * (process_cpu_time / process_lifetime);
+    *cpu_usage = 100. * (*process_cpu_time / *process_lifetime);
 }
+
+/*
+void get_cpu_usage_delta(int pid, sys_stat_t *sys_stat, double freq, int msec) {
+    struct timespec ts;
+    int             res;
+    if (msec < 0) {
+        fprintf(stderr, "Invalid sleep range\n");
+        exit(1);
+    }
+
+    ts.tv_sec         = msec / 1000;
+    ts.tv_nsec        = (msec % 1000) * 1000000;
+
+    double uptime_ini;
+    get_uptime(&uptime_ini);
+    update_proc_stat(pid, sys_stat);
+    double process_cpu_time_ini = (sys_stat->utime + sys_stat->stime +
+                                   sys_stat->cutime + sys_stat->cstime) /
+                                  freq;
+
+    do {
+        res = nanosleep(&ts, &ts);
+    } while (res && errno == EINTR);
+
+    double uptime_end;
+    update_proc_stat(pid, sys_stat);
+    get_uptime(&uptime_end);
+    double process_cpu_time_end = (sys_stat->utime + sys_stat->stime +
+                                   sys_stat->cutime + sys_stat->cstime) /
+                                  freq;
+
+    double cpu_usage_delta =
+        100. * ((process_cpu_time_end - process_cpu_time_ini) /
+                (uptime_end - uptime_ini));
+
+    printf("Cpu delta for %dms (%lf %lf)=%lf\n", msec, process_cpu_time_ini,
+           process_cpu_time_end,cpu_usage_delta
+    );
+}*/
 
 void get_uptime(double *uptime) {
     FILE *fd = fopen("/proc/uptime", "r");
@@ -161,16 +204,19 @@ int main(int argc, char **argv) {
 
     long       freq;
     double     uptime;
-    double     cpu_usage;
+    double     process_cpu_time, process_lifetime, cpu_usage;
     sys_stat_t sys_stat;
     freq = sysconf(_SC_CLK_TCK);
 
-    printf("PID,Name,Total_CPU(%%)\n");
+    printf("PID,Name,CPU_Time,Lifetime,Total_CPU(%%)\n");
     for (;;) {
+        // get_cpu_usage_delta(pid, &sys_stat, freq, 5000);
         get_uptime(&uptime);
         update_proc_stat(pid, &sys_stat);
-        get_cpu_usage(&sys_stat, uptime, freq, &cpu_usage);
-        printf("%d,%s,%lf\n", sys_stat.pid, sys_stat.name, cpu_usage);
+        get_cpu_usage(&sys_stat, uptime, freq, &process_cpu_time,
+                      &process_lifetime, &cpu_usage);
+        printf("%d,%s,%lf,%lf,%lf\n", sys_stat.pid, sys_stat.name,
+               process_cpu_time, process_lifetime, cpu_usage);
     }
     return 0;
 }

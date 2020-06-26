@@ -83,9 +83,9 @@ void update_proc_stat(int pid, sys_stat_t *sys_stat) {
         printf("Failed to get %d stat\n", pid);
         exit(1);
     }
+    // clang-format off
     fscanf(fd,
-           /*(1) pid          */
-           "%d"
+           /*(1) pid          */ "%d"
            /*(2) comm         */ " %s"
            /*(3) state        */ " %*c"
            /*(4) ppid         */ " %*d"
@@ -109,22 +109,26 @@ void update_proc_stat(int pid, sys_stat_t *sys_stat) {
            /*(22) starttime   */ " %llu",
            &sys_stat->pid, sys_stat->name, &sys_stat->utime, &sys_stat->stime,
            &sys_stat->cutime, &sys_stat->cstime, &sys_stat->starttime);
+    // clang-format on
     fclose(fd);
 }
 
+/**
+ * Calculate a process total cpu usage.
+ * */
 void get_cpu_usage(sys_stat_t *sys_stat, double uptime, double freq,
                    double *cpu_usage) {
-    double total_time, seconds;
-    // Some math
+    double process_cpu_time, process_lifetime;
     // First we determine the total time spent for the process:
-    total_time =
-        sys_stat->utime + sys_stat->stime + sys_stat->cutime + sys_stat->cstime;
+    process_cpu_time = (sys_stat->utime + sys_stat->stime + sys_stat->cutime +
+                        sys_stat->cstime) /
+                       freq;
 
     // Next we get the total elapsed time in seconds since the process started:
-    seconds = uptime - (sys_stat->starttime / freq);
+    process_lifetime = uptime - (sys_stat->starttime / freq);
 
     // Finally we calculate the CPU usage percentage:
-    *cpu_usage = 100. * ((total_time / freq) / seconds);
+    *cpu_usage = 100. * (process_cpu_time / process_lifetime);
 }
 
 void get_uptime(double *uptime) {
@@ -161,7 +165,7 @@ int main(int argc, char **argv) {
     sys_stat_t sys_stat;
     freq = sysconf(_SC_CLK_TCK);
 
-    printf("PID,Name,CPU(%%)\n");
+    printf("PID,Name,Total_CPU(%%)\n");
     for (;;) {
         get_uptime(&uptime);
         update_proc_stat(pid, &sys_stat);
